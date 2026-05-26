@@ -194,3 +194,45 @@ func TestUSDCashReconcilesToIBKR(t *testing.T) {
 		t.Fatalf("reconcile closing time in future: %v", last.ClosingTime)
 	}
 }
+
+func TestUSDCashReconcileIgnoresInputFileOrder(t *testing.T) {
+	mapper, err := symbols.New("NASDAQ", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := filepath.Join("..", "..", "testdata")
+	names := []string{"activity_2026_ytd.csv", "activity_2025.csv"} // reversed
+	var slices [][]tv.Transaction
+	var rows []ibkr.Row
+	for _, name := range names {
+		path := filepath.Join(base, name)
+		fileRows, err := ibkr.ParseFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rows = append(rows, fileRows...)
+		res, err := convert.ParseRows(path, fileRows, convert.Options{Mapper: mapper})
+		if err != nil {
+			t.Fatal(err)
+		}
+		slices = append(slices, res.Transactions)
+	}
+	combined := merge.Combine(slices, true)
+	combined = convert.AdjustTransferLots(rows, combined)
+	combined = convert.ReconcileUSDCash(rows, combined)
+
+	const ibkrUSD = 22692.188654552
+	got := convert.SimulateUSDCash(combined)
+	if abs(got-ibkrUSD) > 0.05 {
+		t.Fatalf("USD cash: got %v want ~%v", got, ibkrUSD)
+	}
+	// Must not apply a multi-thousand withdrawal from the older statement's ending cash.
+	for _, tx := range combined {
+		if tx.Symbol == "$CASH" && tx.Side == "Withdrawal" {
+			qty, _ := strconv.ParseFloat(tx.Qty, 64)
+			if qty > 1000 {
+				t.Fatalf("spurious large withdrawal %.2f when inputs are reversed", qty)
+			}
+		}
+	}
+}

@@ -66,11 +66,22 @@ func cashDeposit(amount float64, t time.Time) *tv.Transaction {
 	}
 }
 
-// scanEndingCashUSD returns the last USD "Ending Cash" from Cash Report rows.
+// scanEndingCashUSD returns USD "Ending Cash" from the statement with the latest period end.
+// Input file order must not matter when merging multiple activity statements.
 func scanEndingCashUSD(rows []ibkr.Row) (float64, bool) {
-	var ending float64
+	var periodEnd time.Time
+	var bestPeriod time.Time
+	var bestEnding float64
 	found := false
 	for _, row := range rows {
+		if row.Section == ibkr.SectionStatement && row.RowType == ibkr.RowData {
+			if ibkr.Field(row.Fields, 0) == "Period" {
+				if t, err := ParseIBKRPeriodEnd(ibkr.Field(row.Fields, 1)); err == nil {
+					periodEnd = t
+				}
+			}
+			continue
+		}
 		if row.Section != sectionCashReport || row.RowType != ibkr.RowData {
 			continue
 		}
@@ -84,10 +95,18 @@ func scanEndingCashUSD(rows []ibkr.Row) (float64, bool) {
 		if err != nil {
 			continue
 		}
-		ending = v
-		found = true
+		if periodEnd.IsZero() {
+			bestEnding = v
+			found = true
+			continue
+		}
+		if bestPeriod.IsZero() || !periodEnd.Before(bestPeriod) {
+			bestPeriod = periodEnd
+			bestEnding = v
+			found = true
+		}
 	}
-	return ending, found
+	return bestEnding, found
 }
 
 // scanStatementPeriodEnd returns the last statement period end date (midnight, local).
