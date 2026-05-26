@@ -1,0 +1,6 @@
+Deposits & Withdrawals,Header,Currency,Settle Date,Description,Amount
+Deposits & Withdrawals,Data,ILS,2026-01-04,Electronic Fund Transfer,7000
+Deposits & Withdrawals,Data,ILS,2026-01-26,Electronic Fund Transfer,5000
+Deposits & Withdrawals,Data,Total,,,12000
+Deposits & Withdrawals,Data,Total in USD,,,3920.5
+Deposits & Withdrawals,Data,USD,2025-06-09,Internal Transfer In From Account,41

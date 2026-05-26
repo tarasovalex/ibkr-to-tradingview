@@ -1,0 +1,7 @@
+Trades,Header,DataDiscriminator,Asset Category,Currency,Symbol,Date/Time,Quantity,T. Price,C. Price,Proceeds,Comm/Fee,Basis,Realized P/L,MTM P/L,Code
+Trades,Data,Order,Stocks,USD,NVDA,"2026-04-24, 14:52:05",-15,208,208.27,3120,-2.5,-689.82,2427.68,-4.05,C
+Trades,Data,Order,Stocks,USD,ADBE,"2026-01-13, 10:18:27",1,317.65,309.93,-317.65,-2.5,320.15,0,-7.72,O
+Trades,Data,Order,Forex,ILS,USD.ILS,"2026-01-12, 07:33:27",951,3.1523,,-2997.8373,-3.173595684,,,-2.34224,
+Dividends,Header,Currency,Date,Description,Amount
+Dividends,Data,USD,2026-01-08,TSM(US8740391003) Cash Dividend USD 0.79542 per Share (Ordinary Div - NRA Withholding Exempt),26.04
+Dividends,Data,Total,,,26.04
