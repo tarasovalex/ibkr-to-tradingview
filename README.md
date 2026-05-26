@@ -4,9 +4,9 @@ Convert Interactive Brokers (IBKR) **Activity Statement** CSV exports into a sin
 
 ## What it does
 
-IBKR reports activity in a multi-section CSV format. TradingView expects a flat list of transactions (symbol, side, quantity, price, commission, time). This tool reads one or more IBKR statement files, maps the relevant rows to TradingView’s format, merges them chronologically, and writes one import file.
+IBKR reports activity in a multi-section CSV format. TradingView expects a flat list of transactions (symbol, side, quantity, price, commission, time). This tool reads one or more IBKR statement files, maps the relevant rows to TradingView’s format, merges them, and writes one import file.
 
-Supported activity types include stock trades, dividends, cash deposits and withdrawals, fees, withholding tax, interest, and inbound stock transfers. Forex, stock-loan (SYEP), accruals, and summary-only rows are ignored.
+Supported activity types include stock trades, dividends, cash deposits and withdrawals, fees, withholding tax, debit interest, and inbound stock transfers. Forex, stock-loan (SYEP), credit interest, accruals, and summary-only rows are ignored.
 
 ## Why use it
 
@@ -18,9 +18,18 @@ Supported activity types include stock trades, dividends, cash deposits and with
 
 1. Parse each input CSV using IBKR’s section headers (`Trades`, `Dividends`, `Deposits & Withdrawals`, etc.).
 2. Convert each supported row into a TradingView transaction (including `$CASH` rows for non-trade cash events).
-3. Resolve stock symbols to `SYMBOL:EXCHANGE` using a built-in map, with optional overrides.
-4. Merge all inputs, sort by closing time, and deduplicate identical rows unless you disable deduplication.
-5. Write the output CSV ready for TradingView’s import dialog.
+3. Resolve stock symbols to `EXCHANGE:TICKER` (e.g. `NASDAQ:AAPL`) using a built-in map, with optional overrides.
+4. Merge all inputs and deduplicate exact matches unless you disable deduplication.
+5. Adjust transfer lots for sell cost-basis matching, reconcile USD cash to IBKR’s ending balance, then sort for import (same-day deposits before buys).
+6. Write the output CSV ready for TradingView’s import dialog.
+
+## Limitations
+
+- **Input format** — Standard IBKR **Activity Statement** CSV only (not Flex Query or other report types).
+- **Asset types** — **Stocks** only in Trades and Transfers (no options, bonds, forex, etc.).
+- **Transfers** — **Transfers in** only; outbound transfers are not imported.
+- **Interest** — Debit interest is imported as `$CASH` taxes/fees; positive interest and SYEP credits are skipped.
+- **Cash** — USD cash is reconciled to IBKR’s ending USD balance; ILS cash is converted on deposits/fees but not tracked as a separate balance.
 
 ## Requirements
 
@@ -47,6 +56,8 @@ make build
 ./bin/ibkr2tv convert -h
 ```
 
+Or install the built binary with `make install` (same as `go install ./cmd/ibkr2tv`).
+
 ### Install from module path
 
 If the module is published and reachable by Go:
@@ -68,7 +79,9 @@ ibkr2tv convert -o ./output/tradingview-portfolio.csv \
   ./statements/activity-2026-ytd.csv
 ```
 
-Use as many input files as you need; order does not matter. Overlapping periods are handled by deduplicating exact duplicate transactions.
+Use as many input files as you need; order does not matter. Overlapping periods are handled by deduplicating exact duplicate transactions (same symbol, side, quantity, fill price, commission, and closing time).
+
+On success, the tool prints `wrote … (N rows)` to stderr.
 
 ### Verbose output
 
@@ -76,11 +89,11 @@ Use as many input files as you need; order does not matter. Overlapping periods 
 ibkr2tv convert -v -o ./output/tradingview-portfolio.csv ./statements/*.csv
 ```
 
-With `-v`, the tool prints each file’s statement period, per-section counts, merge size, and warnings on stderr.
+With `-v`, the tool also prints each file’s statement period, per-section counts, merge size, and warnings (e.g. unknown tickers, missing ILS/USD ratio). Re-run with `-v` if imports fail on symbols or cash looks wrong.
 
 ### Custom symbol → exchange map
 
-TradingView needs symbols like `AAPL:NASDAQ`. Defaults are embedded in the binary (from `symbols.json` in the repo). To override or extend:
+TradingView portfolio symbols use **`EXCHANGE:TICKER`** format (e.g. `NASDAQ:AAPL`, `NYSE:TSM`). Defaults are embedded in the binary at build time. To override or extend without rebuilding:
 
 ```bash
 ibkr2tv convert -o ./output/tradingview-portfolio.csv \
@@ -88,7 +101,7 @@ ibkr2tv convert -o ./output/tradingview-portfolio.csv \
   ./statements/activity-2025.csv
 ```
 
-Example `my-symbols.json`:
+Example `my-symbols.json` (maps IBKR ticker → exchange code):
 
 ```json
 {
@@ -97,7 +110,7 @@ Example `my-symbols.json`:
 }
 ```
 
-Unknown tickers use `--default-exchange` (default: `NASDAQ`).
+Unknown tickers use `--default-exchange` (default: `NASDAQ`) and emit a warning when `-v` is set.
 
 ### Flags
 
@@ -108,6 +121,19 @@ Unknown tickers use `--default-exchange` (default: `NASDAQ`).
 | `--default-exchange` | Exchange for unmapped tickers (default: `NASDAQ`) |
 | `--no-dedupe` | Keep duplicate rows (default: remove exact matches) |
 | `-v`, `--verbose` | Per-file period, counts, and warnings |
+
+## Output CSV
+
+The output file has these columns (TradingView import layout):
+
+| Column | Description |
+|--------|-------------|
+| Symbol | `EXCHANGE:TICKER` for stocks, or `$CASH` for cash events |
+| Side | `Buy`, `Sell`, `Dividend`, `Deposit`, `Withdrawal`, or `Taxes and fees` |
+| Qty | Share quantity, dividend USD amount, or cash amount |
+| Fill Price | Per-share price (empty for cash/dividend rows) |
+| Commission | Commission when not folded into fill price on buys |
+| Closing Time | `YYYY-MM-DD H:MM:SS` |
 
 ## Import into TradingView
 
@@ -136,7 +162,7 @@ File names vary by account and period; any path is fine as long as the content i
 | Fees, Withholding Tax, debit Interest | `$CASH` Taxes and fees |
 | Transfers In (stocks) | Buy at carried-over cost basis (see below) |
 
-**Skipped:** forex trades, SYEP stock loan activity, accruals, statement summaries, and non-stock trade lines.
+**Skipped:** forex trades, SYEP and other stock-loan credits, positive/credit interest, accruals, statement summaries, non-stock trade lines, and transfers out.
 
 ## Cost basis and average price
 
@@ -157,7 +183,7 @@ TradingView derives cash from `$CASH` rows plus cash flows from stock trades. Th
 - Sorts each calendar day **deposits before stock buys** so TradingView applies wire transfers before purchases.
 - Imports **Cash FX Translation** and **Payment In Lieu** from the Cash Report.
 - Counts **withholding tax** outflows only (skips positive reversal lines).
-- **Reconciles** to the last statement’s **Ending Cash (USD)** with a small adjustment row if needed.
+- **Reconciles** to the latest statement’s **Ending Cash (USD)** with a deposit or withdrawal row if the simulated balance differs by more than **$0.02**.
 
 ILS cash is not modeled separately; only USD cash is aligned to IBKR’s USD ending balance.
 
@@ -167,7 +193,7 @@ If your statement lists Israeli shekel (ILS) deposits with both `Total` (ILS) an
 
 ## Symbol map in the repository
 
-[`symbols.json`](symbols.json) documents the default ticker → exchange mappings used at build time. You do not need this file at runtime unless you pass `--symbol-map` to override defaults.
+[`symbols.json`](symbols.json) lists the default ticker → exchange mappings. The binary embeds a copy from [`internal/symbols/symbols_default.json`](internal/symbols/symbols_default.json) at **build time**—editing `symbols.json` alone does not change an already-installed binary. Use `--symbol-map` to override at runtime, or rebuild after changing the embedded file.
 
 ## Tests
 
